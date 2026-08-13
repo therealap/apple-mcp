@@ -10,6 +10,11 @@ const CONFIG = {
 	TIMEOUT_MS: 8000,
 };
 
+// Folders that are always excluded from search/list unless the caller
+// explicitly targets them via folderName. Add to this list if you have
+// other "archive" folders you never want surfacing in general queries.
+const EXCLUDED_FOLDERS = ["Recently Deleted"];
+
 type Note = {
 	name: string;
 	content: string;
@@ -73,43 +78,82 @@ async function requestNotesAccess(): Promise<{ hasAccess: boolean; message: stri
 }
 
 /**
- * Get all notes from Notes app (limited for performance)
+ * Build an AppleScript literal list of excluded folder names, e.g.
+ *   {"Recently Deleted"}
  */
-async function getAllNotes(): Promise<Note[]> {
+function buildExcludedFoldersList(): string {
+	return "{" + EXCLUDED_FOLDERS.map((f) => `"${f}"`).join(", ") + "}";
+}
+
+/**
+ * Get notes from Notes app. Iterates through folders so we can skip the
+ * Recently Deleted (trash) folder and scope to a specific folder when
+ * folderName is provided. Limited for performance.
+ */
+async function getAllNotes(folderName?: string): Promise<Note[]> {
 	try {
 		const accessResult = await requestNotesAccess();
 		if (!accessResult.hasAccess) {
 			throw new Error(accessResult.message);
 		}
 
+		const scopedFolderLiteral = folderName ? `"${folderName}"` : `""`;
+		const excludedList = buildExcludedFoldersList();
+
 		const script = `
 tell application "Notes"
     set notesList to {}
     set noteCount to 0
+    set targetFolderName to ${scopedFolderLiteral}
+    set excludedFolders to ${excludedList}
 
-    -- Get all notes from all folders
-    set allNotes to notes
+    -- Iterate folders so we can skip the trash / recently-deleted folder
+    set allFolders to folders
 
-    repeat with i from 1 to (count of allNotes)
+    repeat with currentFolder in allFolders
         if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
 
-        try
-            set currentNote to item i of allNotes
-            set noteName to name of currentNote
-            set noteContent to plaintext of currentNote
+        set thisFolderName to name of currentFolder
+        set shouldInclude to true
 
-            -- Limit content for preview
-            if (length of noteContent) > ${CONFIG.MAX_CONTENT_PREVIEW} then
-                set noteContent to (characters 1 thru ${CONFIG.MAX_CONTENT_PREVIEW} of noteContent) as string
-                set noteContent to noteContent & "..."
-            end if
+        -- If a specific folder was requested, only include that one
+        if targetFolderName is not "" and thisFolderName is not targetFolderName then
+            set shouldInclude to false
+        end if
 
-            set noteInfo to {name:noteName, content:noteContent}
-            set notesList to notesList & {noteInfo}
-            set noteCount to noteCount + 1
-        on error
-            -- Skip problematic notes
-        end try
+        -- Always skip excluded folders unless the caller explicitly asked for one
+        if targetFolderName is "" and excludedFolders contains thisFolderName then
+            set shouldInclude to false
+        end if
+
+        if shouldInclude then
+            try
+                set folderNotes to notes of currentFolder
+                repeat with i from 1 to (count of folderNotes)
+                    if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+
+                    try
+                        set currentNote to item i of folderNotes
+                        set noteName to name of currentNote
+                        set noteContent to plaintext of currentNote
+
+                        -- Limit content for preview
+                        if (length of noteContent) > ${CONFIG.MAX_CONTENT_PREVIEW} then
+                            set noteContent to (characters 1 thru ${CONFIG.MAX_CONTENT_PREVIEW} of noteContent) as string
+                            set noteContent to noteContent & "..."
+                        end if
+
+                        set noteInfo to {name:noteName, content:noteContent}
+                        set notesList to notesList & {noteInfo}
+                        set noteCount to noteCount + 1
+                    on error
+                        -- Skip problematic notes
+                    end try
+                end repeat
+            on error
+                -- Skip folders we can't read
+            end try
+        end if
     end repeat
 
     return notesList
@@ -135,9 +179,10 @@ end tell`;
 }
 
 /**
- * Find notes by search text
+ * Find notes by search text. Iterates folders so we can skip the trash
+ * folder and honour an optional folderName scope.
  */
-async function findNote(searchText: string): Promise<Note[]> {
+async function findNote(searchText: string, folderName?: string): Promise<Note[]> {
 	try {
 		const accessResult = await requestNotesAccess();
 		if (!accessResult.hasAccess) {
@@ -149,39 +194,65 @@ async function findNote(searchText: string): Promise<Note[]> {
 		}
 
 		const searchTerm = searchText.toLowerCase();
+		const scopedFolderLiteral = folderName ? `"${folderName}"` : `""`;
+		const excludedList = buildExcludedFoldersList();
 
 		const script = `
 tell application "Notes"
     set matchedNotes to {}
     set noteCount to 0
     set searchTerm to "${searchTerm}"
+    set targetFolderName to ${scopedFolderLiteral}
+    set excludedFolders to ${excludedList}
 
-    -- Get all notes and search through them
-    set allNotes to notes
+    -- Iterate folders so we can filter by folder and skip trash
+    set allFolders to folders
 
-    repeat with i from 1 to (count of allNotes)
+    repeat with currentFolder in allFolders
         if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
 
-        try
-            set currentNote to item i of allNotes
-            set noteName to name of currentNote
-            set noteContent to plaintext of currentNote
+        set thisFolderName to name of currentFolder
+        set shouldInclude to true
 
-            -- Simple case-insensitive search in name and content
-            if (noteName contains searchTerm) or (noteContent contains searchTerm) then
-                -- Limit content for preview
-                if (length of noteContent) > ${CONFIG.MAX_CONTENT_PREVIEW} then
-                    set noteContent to (characters 1 thru ${CONFIG.MAX_CONTENT_PREVIEW} of noteContent) as string
-                    set noteContent to noteContent & "..."
-                end if
+        if targetFolderName is not "" and thisFolderName is not targetFolderName then
+            set shouldInclude to false
+        end if
 
-                set noteInfo to {name:noteName, content:noteContent}
-                set matchedNotes to matchedNotes & {noteInfo}
-                set noteCount to noteCount + 1
-            end if
-        on error
-            -- Skip problematic notes
-        end try
+        if targetFolderName is "" and excludedFolders contains thisFolderName then
+            set shouldInclude to false
+        end if
+
+        if shouldInclude then
+            try
+                set folderNotes to notes of currentFolder
+                repeat with i from 1 to (count of folderNotes)
+                    if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+
+                    try
+                        set currentNote to item i of folderNotes
+                        set noteName to name of currentNote
+                        set noteContent to plaintext of currentNote
+
+                        -- Simple case-insensitive search in name and content
+                        if (noteName contains searchTerm) or (noteContent contains searchTerm) then
+                            -- Limit content for preview
+                            if (length of noteContent) > ${CONFIG.MAX_CONTENT_PREVIEW} then
+                                set noteContent to (characters 1 thru ${CONFIG.MAX_CONTENT_PREVIEW} of noteContent) as string
+                                set noteContent to noteContent & "..."
+                            end if
+
+                            set noteInfo to {name:noteName, content:noteContent}
+                            set matchedNotes to matchedNotes & {noteInfo}
+                            set noteCount to noteCount + 1
+                        end if
+                    on error
+                        -- Skip problematic notes
+                    end try
+                end repeat
+            on error
+                -- Skip folders we can't read
+            end try
+        end if
     end repeat
 
     return matchedNotes
@@ -336,7 +407,9 @@ end tell`;
 }
 
 /**
- * Get notes from a specific folder
+ * Get notes from a specific folder. Actually returns the notes now
+ * (previously stubbed to an empty array). Also excluded from Recently
+ * Deleted unless the folderName itself IS "Recently Deleted".
  */
 async function getNotesFromFolder(
 	folderName: string,
@@ -356,14 +429,12 @@ tell application "Notes"
     set noteCount to 0
     set folderFound to false
 
-    -- Try to find the specified folder
     try
         set allFolders to folders
         repeat with currentFolder in allFolders
             if name of currentFolder is "${folderName}" then
                 set folderFound to true
 
-                -- Get notes from this folder
                 set folderNotes to notes of currentFolder
 
                 repeat with i from 1 to (count of folderNotes)
@@ -396,39 +467,38 @@ tell application "Notes"
     end try
 
     if not folderFound then
-        return "ERROR:Folder not found"
+        error "FOLDER_NOT_FOUND"
     end if
 
-    return "SUCCESS:" & (count of notesList)
+    return notesList
 end tell`;
 
 		const result = (await runAppleScript(script)) as any;
 
-		// Simple success/failure check based on string result
-		if (result && typeof result === "string") {
-			if (result.startsWith("ERROR:")) {
-				return {
-					success: false,
-					message: result.replace("ERROR:", ""),
-				};
-			} else if (result.startsWith("SUCCESS:")) {
-				// For now, just return success - the actual notes are complex to parse from AppleScript
-				return {
-					success: true,
-					notes: [], // Return empty array for simplicity
-				};
-			}
-		}
+		const resultArray = Array.isArray(result) ? result : result ? [result] : [];
 
-		// If we get here, assume folder was found but no notes
+		const notes: Note[] = resultArray.map((noteData: any) => ({
+			name: noteData.name || "Untitled Note",
+			content: noteData.content || "",
+			creationDate: undefined,
+			modificationDate: undefined,
+		}));
+
 		return {
 			success: true,
-			notes: [],
+			notes,
 		};
 	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (message.includes("FOLDER_NOT_FOUND")) {
+			return {
+				success: false,
+				message: `Folder not found: ${folderName}`,
+			};
+		}
 		return {
 			success: false,
-			message: `Failed to get notes from folder: ${error instanceof Error ? error.message : String(error)}`,
+			message: `Failed to get notes from folder: ${message}`,
 		};
 	}
 }
@@ -441,7 +511,7 @@ async function getRecentNotesFromFolder(
 	limit: number = 5,
 ): Promise<{ success: boolean; notes?: Note[]; message?: string }> {
 	try {
-		// For simplicity, just get notes from folder (they're typically in recent order)
+		// getNotesFromFolder now returns real notes; slice for recent-N.
 		const result = await getNotesFromFolder(folderName);
 
 		if (result.success && result.notes) {
@@ -470,17 +540,15 @@ async function getNotesByDateRange(
 	limit: number = 20,
 ): Promise<{ success: boolean; notes?: Note[]; message?: string }> {
 	try {
-		// For simplicity, just return notes from folder
-		// Date filtering is complex and unreliable in AppleScript
+		// Delegate to folder read; date filtering left as a future improvement
+		// (AppleScript date parsing is expensive and this call site is rare).
 		const result = await getNotesFromFolder(folderName);
-
 		if (result.success && result.notes) {
 			return {
 				success: true,
 				notes: result.notes.slice(0, Math.min(limit, result.notes.length)),
 			};
 		}
-
 		return result;
 	} catch (error) {
 		return {

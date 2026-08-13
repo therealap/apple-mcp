@@ -290,7 +290,7 @@ function initServer() {
 									);
 								}
 
-								const foundNotes = await notesModule.findNote(args.searchText);
+								const foundNotes = await notesModule.findNote(args.searchText, args.folderName);
 								return {
 									content: [
 										{
@@ -307,7 +307,7 @@ function initServer() {
 							}
 
 							case "list": {
-								const allNotes = await notesModule.getAllNotes();
+								const allNotes = await notesModule.getAllNotes(args.folderName);
 								return {
 									content: [
 										{
