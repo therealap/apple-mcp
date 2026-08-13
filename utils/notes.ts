@@ -7,7 +7,17 @@ const CONFIG = {
 	TIMEOUT_MS: 8000,
 };
 
-const EXCLUDED_FOLDERS = ["Recently Deleted"];
+// Apple's built-in smart-folder VIEWS mirror notes from real folders; walking
+// them alongside real folders produces duplicates. Excluding them keeps
+// unscoped list/search returning each note exactly once.
+const EXCLUDED_FOLDERS = [
+	"Recently Deleted",
+	"All",
+	"Group",
+	"Last Month",
+	"Last Week Changes",
+	"People",
+];
 
 // Delimiters used to encode note records as a single string returned from
 // AppleScript. The run-applescript bridge does not reliably parse lists of
