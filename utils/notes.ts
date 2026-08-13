@@ -7,8 +7,13 @@ const CONFIG = {
 	TIMEOUT_MS: 8000,
 };
 
-// Folders excluded from unscoped search/list results.
 const EXCLUDED_FOLDERS = ["Recently Deleted"];
+
+// Delimiters used to encode note records as a single string returned from
+// AppleScript. The run-applescript bridge does not reliably parse lists of
+// records; a delimited string is far more portable.
+const FIELD_SEP = "␞"; // ␞ (record separator)
+const RECORD_SEP = "␟"; // ␟ (unit separator)
 
 type Note = {
 	name: string;
@@ -56,22 +61,34 @@ async function requestNotesAccess(): Promise<{ hasAccess: boolean; message: stri
 	}
 }
 
-/**
- * Escape a string for embedding as an AppleScript double-quoted literal.
- * Handles quotes and backslashes; leaves Unicode (including emoji) untouched.
- */
 function asLiteral(str: string): string {
 	return `"${str.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 /**
- * Build the AppleScript reference for the note source.
- * - If folderName is provided → `notes of folder "<Name>"` (fast, filtered at app level via whose-style resolution).
- * - Otherwise → `notes of app`, minus notes in excluded folders.
- *
- * IMPORTANT: `container of currentNote` in a repeat loop is unusably slow.
- * We keep the top-level query narrow so the per-note loop only touches notes
- * we already want to inspect.
+ * Parse the delimited string returned by the AppleScript helpers into Note[].
+ * Format: name<FS>content<RS>name<FS>content<RS>...
+ * An empty return string means zero notes.
+ */
+function parseDelimitedNotes(result: any): Note[] {
+	if (typeof result !== "string" || result.length === 0) return [];
+	const raw = result;
+	const records = raw.split(RECORD_SEP).filter((r) => r.length > 0);
+	return records.map((rec) => {
+		const [name, content] = rec.split(FIELD_SEP);
+		return {
+			name: name || "Untitled Note",
+			content: content || "",
+			creationDate: undefined,
+			modificationDate: undefined,
+		};
+	});
+}
+
+/**
+ * Read notes across all folders (or scoped to one), returning them as a
+ * delimited string that JS can safely split. Excludes Recently Deleted
+ * unless the caller explicitly asks for that folder.
  */
 async function getAllNotes(folderName?: string): Promise<Note[]> {
 	try {
@@ -84,15 +101,8 @@ async function getAllNotes(folderName?: string): Promise<Note[]> {
 			? buildScopedListScript(folderName)
 			: buildUnscopedListScript();
 
-		const result = (await runAppleScript(script)) as any;
-		const resultArray = normalizeApplescriptListResult(result);
-
-		return resultArray.map((noteData: any) => ({
-			name: (noteData && noteData.name) ? noteData.name : "Untitled Note",
-			content: (noteData && noteData.content) ? noteData.content : "",
-			creationDate: undefined,
-			modificationDate: undefined,
-		}));
+		const result = await runAppleScript(script);
+		return parseDelimitedNotes(result);
 	} catch (error) {
 		console.error(
 			`Error getting all notes: ${error instanceof Error ? error.message : String(error)}`,
@@ -103,26 +113,27 @@ async function getAllNotes(folderName?: string): Promise<Note[]> {
 
 function buildUnscopedListScript(): string {
 	const excludedNamesList = EXCLUDED_FOLDERS.map(asLiteral).join(", ");
+	const fieldSepLit = asLiteral(FIELD_SEP);
+	const recordSepLit = asLiteral(RECORD_SEP);
 
 	return `
 tell application "Notes"
-    set notesList to {}
+    set fieldSep to ${fieldSepLit}
+    set recordSep to ${recordSepLit}
+    set outText to ""
     set noteCount to 0
     set excludedFolders to {${excludedNamesList}}
 
-    -- Collect notes across all folders except excluded ones.
-    -- Iterating folders and grabbing "notes of folder" avoids the very slow
-    -- per-note "container of currentNote" lookup pattern.
     set allFolders to folders
     repeat with currentFolder in allFolders
-        if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+        if noteCount ≥ ${CONFIG.MAX_NOTES} then exit repeat
 
         set thisFolderName to name of currentFolder
         if excludedFolders does not contain thisFolderName then
             try
                 set folderNotes to notes of currentFolder
                 repeat with i from 1 to (count of folderNotes)
-                    if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+                    if noteCount ≥ ${CONFIG.MAX_NOTES} then exit repeat
                     try
                         set currentNote to item i of folderNotes
                         set noteName to name of currentNote
@@ -133,32 +144,33 @@ tell application "Notes"
                             set noteContent to noteContent & "..."
                         end if
 
-                        set noteInfo to {name:noteName, content:noteContent}
-                        set notesList to notesList & {noteInfo}
+                        set outText to outText & noteName & fieldSep & noteContent & recordSep
                         set noteCount to noteCount + 1
                     on error
                     end try
                 end repeat
             on error
-                -- Skip folders that can't be enumerated (account containers, etc.)
             end try
         end if
     end repeat
 
-    return notesList
+    return outText
 end tell`;
 }
 
 function buildScopedListScript(folderName: string): string {
 	const folderLiteral = asLiteral(folderName);
+	const fieldSepLit = asLiteral(FIELD_SEP);
+	const recordSepLit = asLiteral(RECORD_SEP);
 
 	return `
 tell application "Notes"
-    set notesList to {}
+    set fieldSep to ${fieldSepLit}
+    set recordSep to ${recordSepLit}
+    set outText to ""
     set noteCount to 0
     set targetName to ${folderLiteral}
 
-    -- Find every folder that matches by name across all accounts, then read notes from each.
     set matchingFolders to {}
     try
         set allFolders to folders
@@ -174,15 +186,15 @@ tell application "Notes"
     end try
 
     if (count of matchingFolders) is 0 then
-        return notesList
+        return outText
     end if
 
     repeat with currentFolder in matchingFolders
-        if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+        if noteCount ≥ ${CONFIG.MAX_NOTES} then exit repeat
         try
             set folderNotes to notes of currentFolder
             repeat with i from 1 to (count of folderNotes)
-                if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+                if noteCount ≥ ${CONFIG.MAX_NOTES} then exit repeat
                 try
                     set currentNote to item i of folderNotes
                     set noteName to name of currentNote
@@ -193,8 +205,7 @@ tell application "Notes"
                         set noteContent to noteContent & "..."
                     end if
 
-                    set noteInfo to {name:noteName, content:noteContent}
-                    set notesList to notesList & {noteInfo}
+                    set outText to outText & noteName & fieldSep & noteContent & recordSep
                     set noteCount to noteCount + 1
                 on error
                 end try
@@ -203,14 +214,10 @@ tell application "Notes"
         end try
     end repeat
 
-    return notesList
+    return outText
 end tell`;
 }
 
-/**
- * Search notes. Same top-level narrowing strategy: use folder-scoped iteration
- * to keep the per-note loop small and avoid the slow container-lookup pattern.
- */
 async function findNote(searchText: string, folderName?: string): Promise<Note[]> {
 	try {
 		const accessResult = await requestNotesAccess();
@@ -229,15 +236,8 @@ async function findNote(searchText: string, folderName?: string): Promise<Note[]
 			? buildScopedSearchScript(folderName, searchTermLiteral)
 			: buildUnscopedSearchScript(searchTermLiteral);
 
-		const result = (await runAppleScript(script)) as any;
-		const resultArray = normalizeApplescriptListResult(result);
-
-		return resultArray.map((noteData: any) => ({
-			name: (noteData && noteData.name) ? noteData.name : "Untitled Note",
-			content: (noteData && noteData.content) ? noteData.content : "",
-			creationDate: undefined,
-			modificationDate: undefined,
-		}));
+		const result = await runAppleScript(script);
+		return parseDelimitedNotes(result);
 	} catch (error) {
 		console.error(
 			`Error finding notes: ${error instanceof Error ? error.message : String(error)}`,
@@ -248,24 +248,28 @@ async function findNote(searchText: string, folderName?: string): Promise<Note[]
 
 function buildUnscopedSearchScript(searchTermLiteral: string): string {
 	const excludedNamesList = EXCLUDED_FOLDERS.map(asLiteral).join(", ");
+	const fieldSepLit = asLiteral(FIELD_SEP);
+	const recordSepLit = asLiteral(RECORD_SEP);
 
 	return `
 tell application "Notes"
-    set matchedNotes to {}
+    set fieldSep to ${fieldSepLit}
+    set recordSep to ${recordSepLit}
+    set outText to ""
     set noteCount to 0
     set searchTerm to ${searchTermLiteral}
     set excludedFolders to {${excludedNamesList}}
 
     set allFolders to folders
     repeat with currentFolder in allFolders
-        if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+        if noteCount ≥ ${CONFIG.MAX_NOTES} then exit repeat
 
         set thisFolderName to name of currentFolder
         if excludedFolders does not contain thisFolderName then
             try
                 set folderNotes to notes of currentFolder
                 repeat with i from 1 to (count of folderNotes)
-                    if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+                    if noteCount ≥ ${CONFIG.MAX_NOTES} then exit repeat
                     try
                         set currentNote to item i of folderNotes
                         set noteName to name of currentNote
@@ -277,8 +281,7 @@ tell application "Notes"
                                 set noteContent to noteContent & "..."
                             end if
 
-                            set noteInfo to {name:noteName, content:noteContent}
-                            set matchedNotes to matchedNotes & {noteInfo}
+                            set outText to outText & noteName & fieldSep & noteContent & recordSep
                             set noteCount to noteCount + 1
                         end if
                     on error
@@ -289,16 +292,20 @@ tell application "Notes"
         end if
     end repeat
 
-    return matchedNotes
+    return outText
 end tell`;
 }
 
 function buildScopedSearchScript(folderName: string, searchTermLiteral: string): string {
 	const folderLiteral = asLiteral(folderName);
+	const fieldSepLit = asLiteral(FIELD_SEP);
+	const recordSepLit = asLiteral(RECORD_SEP);
 
 	return `
 tell application "Notes"
-    set matchedNotes to {}
+    set fieldSep to ${fieldSepLit}
+    set recordSep to ${recordSepLit}
+    set outText to ""
     set noteCount to 0
     set searchTerm to ${searchTermLiteral}
     set targetName to ${folderLiteral}
@@ -318,15 +325,15 @@ tell application "Notes"
     end try
 
     if (count of matchingFolders) is 0 then
-        return matchedNotes
+        return outText
     end if
 
     repeat with currentFolder in matchingFolders
-        if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+        if noteCount ≥ ${CONFIG.MAX_NOTES} then exit repeat
         try
             set folderNotes to notes of currentFolder
             repeat with i from 1 to (count of folderNotes)
-                if noteCount >= ${CONFIG.MAX_NOTES} then exit repeat
+                if noteCount ≥ ${CONFIG.MAX_NOTES} then exit repeat
                 try
                     set currentNote to item i of folderNotes
                     set noteName to name of currentNote
@@ -338,8 +345,7 @@ tell application "Notes"
                             set noteContent to noteContent & "..."
                         end if
 
-                        set noteInfo to {name:noteName, content:noteContent}
-                        set matchedNotes to matchedNotes & {noteInfo}
+                        set outText to outText & noteName & fieldSep & noteContent & recordSep
                         set noteCount to noteCount + 1
                     end if
                 on error
@@ -349,25 +355,8 @@ tell application "Notes"
         end try
     end repeat
 
-    return matchedNotes
+    return outText
 end tell`;
-}
-
-/**
- * AppleScript's `{}` is ambiguous — empty list vs empty record. run-applescript
- * may return `{}` (empty JS object) for an empty list. Treat objects with no
- * name/content keys as empty results so we don't emit phantom "Untitled Note" rows.
- */
-function normalizeApplescriptListResult(result: any): any[] {
-	if (Array.isArray(result)) return result;
-	if (result === null || result === undefined || result === "") return [];
-	if (typeof result === "object") {
-		if (result.name !== undefined || result.content !== undefined) {
-			return [result];
-		}
-		return [];
-	}
-	return [result];
 }
 
 async function createNote(
