@@ -69,6 +69,18 @@ Click below for one click install with `.dxt`
 - Create guides (be that friend who plans everything)
 - Drop pins like you're claiming territory
 
+### ❤️ **Health** - Your Apple Health data, finally answerable
+
+- Ask what your steps, heart rate or sleep actually did last month
+- Roll data up by day, week or month (sum, average, min, max)
+- List your workouts with distance, duration and energy burned
+- Get a whole-window summary across every metric at once
+
+> **Heads up:** this one reads JSON exports written by the **Health Auto
+> Export** iOS app rather than the Health database directly, because macOS
+> gives no scriptable access to Health. See
+> [Setting up Health data](#-setting-up-health-data) below.
+
 ## 🎭 The Magic of Chaining Commands
 
 Here's where it gets spicy. You can literally say:
@@ -144,6 +156,71 @@ Here's a step-by-step video walkthrough: https://x.com/DhravyaShah/status/189269
 ```
 "Find the nearest pizza place and save it to my favorites"
 ```
+
+```
+"What was my average resting heart rate each week last month?"
+```
+
+## ❤️ Setting Up Health Data
+
+Unlike the other tools, Health doesn't talk to an app on your Mac — Apple
+provides no scriptable access to the Health database. Instead it reads the JSON
+files that the **Health Auto Export** iOS app writes to a folder you can see
+from your Mac.
+
+**1. Export from your iPhone**
+
+In Health Auto Export, create an automation with:
+
+- **Format:** JSON (CSV exports are not read)
+- **Destination:** a folder in iCloud Drive, Dropbox, or anywhere else that
+  syncs to this Mac
+- **Metrics:** whichever ones you want to ask about
+
+**2. Point the MCP server at that folder**
+
+The tool checks, in order:
+
+1. the `directory` argument, if you pass one on a call
+2. the `APPLE_MCP_HEALTH_DIR` environment variable
+3. a Health Auto Export iCloud container under `~/Library/Mobile Documents`
+4. common export locations in iCloud Drive, Dropbox, Documents and Downloads
+
+Setting the environment variable is the reliable option, since the destination
+folder is whatever you picked in the app:
+
+```json
+{
+  "mcpServers": {
+    "apple-mcp": {
+      "command": "bunx",
+      "args": ["--no-cache", "apple-mcp@latest"],
+      "env": {
+        "APPLE_MCP_HEALTH_DIR": "/Users/you/Library/Mobile Documents/com~apple~CloudDocs/HealthAutoExport"
+      }
+    }
+  }
+}
+```
+
+**3. Check it worked**
+
+Ask _"what health exports can you see?"_ — the `sources` operation reports the
+folder in use, the files it parsed, and the reason for anything it skipped.
+
+### Notes on how the data is read
+
+- Export files are merged, and overlapping re-exports are de-duplicated by
+  timestamp, with the most recently written file winning. Health Auto Export
+  routinely re-exports the same window, so this stops days being double counted.
+- Aggregations return count, sum, average, min and max together, because the
+  right statistic depends on the metric — steps are summed, resting heart rate
+  is averaged — and the export doesn't say which applies.
+- Composite metrics (`blood_pressure`, `sleep_analysis`) expose their individual
+  numbers as fields; pass `field: "systolic"` or `field: "deep"` to aggregate
+  one of them. `listMetrics` shows which fields each metric provides, and
+  `summary` falls back to a metric's first field, naming it in square brackets.
+- Nothing is written back — the tool only ever reads your export folder.
 
 ## 🛠️ Local Development (For the Tinkerers)
 

@@ -18,7 +18,11 @@ npm run test:calendar
 npm run test:maps
 npm run test:web-search
 npm run test:mcp
+npm run test:health
 ```
+
+`test:health` needs no Mac and no permissions — it parses fixture export
+files written to a temp folder.
 
 ## 📋 Prerequisites
 
@@ -60,6 +64,8 @@ tests/
 │   ├── calendar.test.ts       # Calendar functionality
 │   ├── maps.test.ts           # Maps functionality
 │   └── web-search.test.ts     # Web search functionality
+├── unit/                      # Pure tests, no Apple apps required
+│   └── health.test.ts         # Health Auto Export parsing
 └── mcp/
     └── handlers.test.ts       # MCP tool handler validation
 ```
@@ -72,7 +78,14 @@ tests/
 - **Deterministic Data**: Uses consistent test phone number and data
 - **Comprehensive Coverage**: Success, failure, and edge cases
 
-### 2. Handler Tests
+### 2. Unit Tests
+
+- **No Apple Apps**: The health tool reads exported JSON files, so its tests
+  run anywhere, including CI, with fixtures written to a temp directory
+- **No Permissions**: Nothing is prompted for, and nothing is written outside
+  that temp directory
+
+### 3. Handler Tests
 
 - **MCP Tool Validation**: Verifies tool schemas and structure
 - **Parameter Validation**: Checks required/optional parameters

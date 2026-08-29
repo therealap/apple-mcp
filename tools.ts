@@ -291,6 +291,51 @@ const MAPS_TOOL: Tool = {
   }
 };
 
-const tools = [CONTACTS_TOOL, NOTES_TOOL, MESSAGES_TOOL, MAIL_TOOL, REMINDERS_TOOL, CALENDAR_TOOL, MAPS_TOOL];
+const HEALTH_TOOL: Tool = {
+  name: "health",
+  description: "Read Apple Health data from JSON exports written by the Health Auto Export app. The app must already be exporting to a folder on this Mac (iCloud Drive, Dropbox or Files); use the 'sources' operation to check what was found and how to configure it.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      operation: {
+        type: "string",
+        description: "Operation to perform: 'sources' (show the export folder and files in use), 'listMetrics' (metric names available), 'query' (data points for one metric), 'workouts' (recorded workouts), or 'summary' (all metrics over a date range)",
+        enum: ["sources", "listMetrics", "query", "workouts", "summary"]
+      },
+      metric: {
+        type: "string",
+        description: "Metric name to query, e.g. 'step_count', 'heart_rate', 'sleep_analysis' (required for query). Matching ignores case, spaces, dashes and underscores, and a unique partial name is accepted."
+      },
+      startDate: {
+        type: "string",
+        description: "Only include data on or after this date. Accepts 'YYYY-MM-DD' or a full timestamp (optional)"
+      },
+      endDate: {
+        type: "string",
+        description: "Only include data on or before this date. Accepts 'YYYY-MM-DD' or a full timestamp (optional)"
+      },
+      aggregation: {
+        type: "string",
+        description: "How to group query results. 'none' returns raw data points; the others return count, sum, average, min and max per period (optional for query, defaults to 'none')",
+        enum: ["none", "daily", "weekly", "monthly", "total"]
+      },
+      field: {
+        type: "string",
+        description: "Which number to aggregate for metrics that carry several, e.g. 'systolic' for blood_pressure or 'deep' for sleep_analysis. Defaults to 'qty' (optional for query). Use listMetrics to see the fields a metric provides."
+      },
+      limit: {
+        type: "number",
+        description: "Maximum number of data points or workouts to return, newest first (optional)"
+      },
+      directory: {
+        type: "string",
+        description: "Folder holding the Health Auto Export JSON files. Defaults to the APPLE_MCP_HEALTH_DIR environment variable, then to common iCloud Drive and Dropbox export locations (optional)"
+      }
+    },
+    required: ["operation"]
+  }
+};
+
+const tools = [CONTACTS_TOOL, NOTES_TOOL, MESSAGES_TOOL, MAIL_TOOL, REMINDERS_TOOL, CALENDAR_TOOL, MAPS_TOOL, HEALTH_TOOL];
 
 export default tools;

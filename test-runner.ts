@@ -12,6 +12,9 @@ const testCommands = {
   "maps": "bun test tests/integration/maps.test.ts --preload ./tests/setup.ts",
   "web-search": "bun test tests/integration/web-search.test.ts --preload ./tests/setup.ts",
   "mcp": "bun test tests/mcp/handlers.test.ts --preload ./tests/setup.ts",
+  // Health parses exported files rather than driving an Apple app, so it
+  // needs no test-data setup and runs without the preload.
+  "health": "bun test tests/unit/health.test.ts",
   "all": "bun test tests/**/*.test.ts --preload ./tests/setup.ts"
 };
 
