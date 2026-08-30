@@ -3,8 +3,8 @@
 	"name": "apple-mcp",
 	"display_name": "Apple MCP",
 	"version": "1.0.0",
-	"description": "Apple MCP tools for contacts, notes, messages, mail, reminders, calendar, and maps integration",
-	"long_description": "Apple MCP gives LLMs access to Apple's native apps including Contacts, Notes, Messages, Mail, Reminders, Calendar, and Maps. This integration allows LLMs to interact with these apps seamlessly, enabling comprehensive automation of daily tasks like managing contacts, creating notes, sending messages, handling emails, setting reminders, managing calendar events, and navigating with Maps.",
+	"description": "Apple MCP tools for contacts, notes, messages, mail, reminders, calendar, maps, and health integration",
+	"long_description": "Apple MCP gives LLMs access to Apple's native apps including Contacts, Notes, Messages, Mail, Reminders, Calendar, and Maps. This integration allows LLMs to interact with these apps seamlessly, enabling comprehensive automation of daily tasks like managing contacts, creating notes, sending messages, handling emails, setting reminders, managing calendar events, navigating with Maps, and reviewing Apple Health data exported by the Health Auto Export app.",
 	"author": {
 		"name": "Dhravya Shah",
 		"email": "dhravya@supermemory.com",
@@ -20,7 +20,8 @@
 		"calendar",
 		"notes",
 		"reminders",
-		"maps"
+		"maps",
+		"health"
 	],
 	"icon": "https://supermemory.ai/_astro/gradient-icon.DNStxMeh.svg",
 	"server": {
@@ -29,7 +30,9 @@
 		"mcp_config": {
 			"command": "node",
 			"args": ["${__dirname}/dist/index.js"],
-			"env": {}
+			"env": {
+				"APPLE_MCP_HEALTH_DIR": "${user_config.health_export_dir}"
+			}
 		}
 	},
 	"tools": [
@@ -60,12 +63,23 @@
 		{
 			"name": "maps",
 			"description": "Search locations, manage guides, save favorites, and get directions using Apple Maps"
+		},
+		{
+			"name": "health",
+			"description": "Read Apple Health data from JSON exports written by the Health Auto Export app"
 		}
 	],
 	"compatibility": {
 		"platforms": ["darwin"]
 	},
-	"user_config": {},
+	"user_config": {
+		"health_export_dir": {
+			"type": "directory",
+			"title": "Health Auto Export folder",
+			"description": "Folder holding JSON exports from the Health Auto Export app. Only needed for the health tool; leave blank if you do not use it.",
+			"required": false
+		}
+	},
 	"license": "MIT",
 	"repository": {
 		"type": "git",
