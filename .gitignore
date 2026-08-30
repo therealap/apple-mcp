@@ -22,7 +22,9 @@ howtocalendar
 cursor
 seyub
 debug
-mcp
+# Anchored to the repo root: a bare "mcp" matches any directory of that
+# name at any depth, which silently ignored tests/mcp/.
+/mcp
 index-safe.ts
 setup-global-command.sh
 update-command.sh
