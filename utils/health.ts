@@ -554,9 +554,32 @@ async function openExports(
 	try {
 		const data = await loadExports(directory);
 		if (data.files.length === 0) {
+			// The per-file reasons are the whole diagnostic when an export turns
+			// out not to have the shape this parser expects, so surface them
+			// rather than only reporting that nothing was readable.
+			const reasons = data.skipped
+				.slice(0, 10)
+				.map((entry) => `- ${entry.path}: ${entry.reason}`);
+			const more =
+				data.skipped.length > reasons.length
+					? [`- ...and ${data.skipped.length - reasons.length} more`]
+					: [];
+
 			return {
 				success: false,
-				message: `Found the folder "${directory}" but no readable Health Auto Export JSON files inside it. Make sure the app's automation uses the JSON format (CSV exports are not supported).`,
+				message: [
+					`Found the folder "${directory}" but could not read any Health Auto Export JSON from it.`,
+					data.skipped.length === 0
+						? "It contains no .json files at all. Check that the app's automation uses the JSON format — CSV exports are not supported."
+						: "Files examined:",
+					...reasons,
+					...more,
+					data.skipped.length === 0
+						? ""
+						: "\nIf these are Health Auto Export files, the export format may differ from what this tool expects; the reasons above say what it found instead.",
+				]
+					.filter(Boolean)
+					.join("\n"),
 			};
 		}
 		return { success: true, data };

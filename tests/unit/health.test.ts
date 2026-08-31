@@ -545,14 +545,35 @@ describe("Health Auto Export parsing", () => {
 			expect(result.message).toContain("APPLE_MCP_HEALTH_DIR");
 		});
 
-		it("says so when the folder holds no export files", async () => {
+		it("says so when the folder holds no export files at all", async () => {
 			const directory = join(root, "empty");
 			await fs.mkdir(directory, { recursive: true });
 
 			const result = await healthModule.listMetrics(directory);
 			expect(result.success).toBe(false);
 			if (result.success) return;
-			expect(result.message).toContain("no readable Health Auto Export JSON");
+			expect(result.message).toContain("could not read any Health Auto Export");
+			expect(result.message).toContain("no .json files at all");
+		});
+
+		it("names each file and reason when nothing parses", async () => {
+			// The likeliest real-world failure: the folder holds JSON, but not in
+			// the shape this parser expects. The per-file reasons are the only
+			// way for someone to tell what went wrong.
+			const directory = join(root, "unparseable");
+			await writeExport(directory, "wrong-shape.json", {
+				healthData: { steps: [{ day: "2024-03-01", value: 5000 }] },
+			});
+			await fs.writeFile(join(directory, "corrupt.json"), "{not json", "utf8");
+
+			const result = await healthModule.listMetrics(directory);
+			expect(result.success).toBe(false);
+			if (result.success) return;
+
+			expect(result.message).toContain("wrong-shape.json");
+			expect(result.message).toContain("not a Health Auto Export file");
+			expect(result.message).toContain("corrupt.json");
+			expect(result.message).toContain("unreadable JSON");
 		});
 	});
 });
