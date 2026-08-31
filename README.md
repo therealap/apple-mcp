@@ -205,8 +205,18 @@ folder is whatever you picked in the app:
 
 **3. Check it worked**
 
-Ask _"what health exports can you see?"_ — the `sources` operation reports the
-folder in use, the files it parsed, and the reason for anything it skipped.
+Point the bundled diagnostic at your export folder:
+
+```bash
+bun run health:check ~/path/to/your/HealthAutoExport
+```
+
+It prints the files it read, the metrics it found, and a sample daily query —
+or, if it cannot read them, names each file and why. That last part is what to
+send along if your export does not parse.
+
+You can also just ask Claude _"what health exports can you see?"_, which runs
+the same `sources` operation.
 
 ### Notes on how the data is read
 

@@ -38,6 +38,7 @@
 		"test:calendar": "bun test tests/integration/calendar.test.ts --preload ./tests/setup.ts",
 		"test:maps": "bun test tests/integration/maps.test.ts --preload ./tests/setup.ts",
 		"test:health": "bun test tests/unit/health.test.ts",
+		"health:check": "bun run scripts/check-health-export.ts",
 		"test:mcp": "bun test tests/mcp/handlers.test.ts --preload ./tests/setup.ts"
 	},
 	"devDependencies": {
