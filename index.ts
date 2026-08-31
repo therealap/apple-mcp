@@ -25,6 +25,7 @@ let reminders: typeof import("./utils/reminders").default | null = null;
 
 let calendar: typeof import("./utils/calendar").default | null = null;
 let maps: typeof import("./utils/maps").default | null = null;
+let health: typeof import("./utils/health").default | null = null;
 
 // Type map for module names to their types
 type ModuleMap = {
@@ -35,6 +36,7 @@ type ModuleMap = {
 	reminders: typeof import("./utils/reminders").default;
 	calendar: typeof import("./utils/calendar").default;
 	maps: typeof import("./utils/maps").default;
+	health: typeof import("./utils/health").default;
 };
 
 // Helper function for lazy module loading
@@ -46,7 +48,8 @@ async function loadModule<
 		| "mail"
 		| "reminders"
 		| "calendar"
-		| "maps",
+		| "maps"
+		| "health",
 >(moduleName: T): Promise<ModuleMap[T]> {
 	if (safeModeFallback) {
 		console.error(`Loading ${moduleName} module on demand (safe mode)...`);
@@ -75,6 +78,9 @@ async function loadModule<
 			case "maps":
 				if (!maps) maps = (await import("./utils/maps")).default;
 				return maps as ModuleMap[T];
+			case "health":
+				if (!health) health = (await import("./utils/health")).default;
+				return health as ModuleMap[T];
 			default:
 				throw new Error(`Unknown module: ${moduleName}`);
 		}
@@ -99,6 +105,8 @@ loadingTimeout = setTimeout(() => {
 	mail = null;
 	reminders = null;
 	calendar = null;
+	maps = null;
+	health = null;
 
 	// Proceed with server setup
 	initServer();
@@ -132,6 +140,9 @@ async function attemptEagerLoading() {
 		maps = (await import("./utils/maps")).default;
 		console.error("- Maps module loaded successfully");
 
+		health = (await import("./utils/health")).default;
+		console.error("- Health module loaded successfully");
+
 		// If we get here, clear the timeout and proceed with eager loading
 		if (loadingTimeout) {
 			clearTimeout(loadingTimeout);
@@ -160,8 +171,9 @@ async function attemptEagerLoading() {
 		message = null;
 		mail = null;
 		reminders = null;
-			calendar = null;
+		calendar = null;
 		maps = null;
+		health = null;
 
 		// Initialize the server in safe mode
 		initServer();
@@ -1277,6 +1289,319 @@ end tell`;
 					}
 				}
 
+				case "health": {
+					if (!isHealthArgs(args)) {
+						throw new Error("Invalid arguments for health tool");
+					}
+
+					try {
+						const healthModule = await loadModule("health");
+						const { operation } = args;
+
+						switch (operation) {
+							case "sources": {
+								const result = await healthModule.getSources(args.directory);
+								if (!result.success) {
+									return {
+										content: [{ type: "text", text: result.message }],
+										isError: true,
+									};
+								}
+
+								const fileLines = result.files.map(
+									(file) =>
+										`- ${file.path} (modified ${formatDate(file.modified)}, ${file.metricNames.length} metrics, ${file.workoutCount} workouts)`,
+								);
+								const skippedLines = result.skipped.map(
+									(entry) => `- ${entry.path}: ${entry.reason}`,
+								);
+
+								return {
+									content: [
+										{
+											type: "text",
+											text: [
+												`Health Auto Export folder: ${result.directory}`,
+												`${result.files.length} export file(s), ${result.metricCount} distinct metrics, ${result.workoutCount} workouts.`,
+												...(result.truncated
+													? [
+															"",
+															"WARNING: the scan stopped at its file limit, so some exports were not read and totals here are incomplete. Point the tool at a narrower folder.",
+														]
+													: []),
+												"",
+												"Files:",
+												...fileLines,
+												...(skippedLines.length
+													? ["", "Skipped:", ...skippedLines]
+													: []),
+											].join("\n"),
+										},
+									],
+									isError: false,
+								};
+							}
+
+							case "listMetrics": {
+								const result = await healthModule.listMetrics(args.directory);
+								if (!result.success) {
+									return {
+										content: [{ type: "text", text: result.message }],
+										isError: true,
+									};
+								}
+
+								if (result.metrics.length === 0) {
+									return {
+										content: [
+											{
+												type: "text",
+												text: `No metrics found in the exports at ${result.directory}.`,
+											},
+										],
+										isError: false,
+									};
+								}
+
+								const lines = result.metrics.map((metric) => {
+									const units = metric.units ? ` ${metric.units}` : "";
+									const range =
+										metric.first && metric.last
+											? `, ${formatDate(metric.first)} to ${formatDate(metric.last)}`
+											: "";
+									const fields =
+										metric.fields.length > 1
+											? `, fields: ${metric.fields.join(", ")}`
+											: "";
+									return `- ${metric.name}${units} (${metric.sampleCount} samples${range}${fields})`;
+								});
+
+								return {
+									content: [
+										{
+											type: "text",
+											text: `Found ${result.metrics.length} metrics in ${result.directory}:\n\n${lines.join("\n")}`,
+										},
+									],
+									isError: false,
+								};
+							}
+
+							case "query": {
+								if (!args.metric) {
+									throw new Error("Metric is required for query operation");
+								}
+
+								const result = await healthModule.queryMetric({
+									metric: args.metric,
+									startDate: args.startDate,
+									endDate: args.endDate,
+									aggregation: args.aggregation,
+									field: args.field,
+									limit: args.limit,
+									directory: args.directory,
+								});
+
+								if (!result.success) {
+									return {
+										content: [{ type: "text", text: result.message }],
+										isError: true,
+									};
+								}
+
+								const units = result.units ? ` (${result.units})` : "";
+								const header = `${result.metric}${units} — ${result.totalMatched} data point(s) in range`;
+
+								if (result.buckets) {
+									if (result.buckets.length === 0) {
+										return {
+											content: [
+												{ type: "text", text: `${header}. Nothing to aggregate.` },
+											],
+											isError: false,
+										};
+									}
+
+									const lines = result.buckets.map(
+										(bucket) =>
+											`- ${bucket.period}: sum ${round(bucket.sum)}, avg ${round(bucket.avg)}, min ${round(bucket.min)}, max ${round(bucket.max)} (n=${bucket.count})`,
+									);
+									return {
+										content: [
+											{
+												type: "text",
+												text: `${header}, grouped ${result.aggregation} on "${result.field}":\n\n${lines.join("\n")}`,
+											},
+										],
+										isError: false,
+									};
+								}
+
+								const samples = result.samples ?? [];
+								if (samples.length === 0) {
+									return {
+										content: [
+											{
+												type: "text",
+												text: `${header}. No data points for that range.`,
+											},
+										],
+										isError: false,
+									};
+								}
+
+								const lines = samples.map((sample) => {
+									const values =
+										sample.qty !== undefined
+											? round(sample.qty)
+											: Object.entries(sample.fields)
+													.map(([key, value]) => `${key} ${round(value)}`)
+													.join(", ");
+									const source = sample.source ? ` [${sample.source}]` : "";
+									return `- ${formatDate(sample.date)}: ${values}${source}`;
+								});
+
+								const truncated =
+									result.totalMatched > samples.length
+										? `\n\n(showing the ${samples.length} most recent of ${result.totalMatched})`
+										: "";
+
+								return {
+									content: [
+										{
+											type: "text",
+											text: `${header}:\n\n${lines.join("\n")}${truncated}`,
+										},
+									],
+									isError: false,
+								};
+							}
+
+							case "workouts": {
+								const result = await healthModule.listWorkouts({
+									startDate: args.startDate,
+									endDate: args.endDate,
+									limit: args.limit,
+									directory: args.directory,
+								});
+
+								if (!result.success) {
+									return {
+										content: [{ type: "text", text: result.message }],
+										isError: true,
+									};
+								}
+
+								if (result.workouts.length === 0) {
+									return {
+										content: [
+											{ type: "text", text: "No workouts found for that range." },
+										],
+										isError: false,
+									};
+								}
+
+								const lines = result.workouts.map((workout) => {
+									const when = workout.start
+										? formatDate(workout.start)
+										: "unknown date";
+									const duration =
+										workout.durationSeconds !== undefined
+											? `, ${round(workout.durationSeconds / 60)} min`
+											: "";
+									const details = Object.entries(workout.quantities)
+										.map(
+											([key, quantity]) =>
+												`${key} ${round(quantity.qty)}${quantity.units ? ` ${quantity.units}` : ""}`,
+										)
+										.join(", ");
+									return `- ${when} — ${workout.name}${duration}${details ? ` (${details})` : ""}`;
+								});
+
+								const truncated =
+									result.totalMatched > result.workouts.length
+										? `\n\n(showing the ${result.workouts.length} most recent of ${result.totalMatched})`
+										: "";
+
+								return {
+									content: [
+										{
+											type: "text",
+											text: `Found ${result.totalMatched} workout(s):\n\n${lines.join("\n")}${truncated}`,
+										},
+									],
+									isError: false,
+								};
+							}
+
+							case "summary": {
+								const result = await healthModule.getSummary({
+									startDate: args.startDate,
+									endDate: args.endDate,
+									directory: args.directory,
+								});
+
+								if (!result.success) {
+									return {
+										content: [{ type: "text", text: result.message }],
+										isError: true,
+									};
+								}
+
+								const window =
+									result.from || result.to
+										? `${result.from ? formatDate(result.from) : "the start"} to ${result.to ? formatDate(result.to) : "the latest export"}`
+										: "the whole export";
+
+								if (result.metrics.length === 0) {
+									return {
+										content: [
+											{
+												type: "text",
+												text: `No health data recorded over ${window}.`,
+											},
+										],
+										isError: false,
+									};
+								}
+
+								const lines = result.metrics.map((metric) => {
+									const units = metric.units ? ` ${metric.units}` : "";
+									// Composite metrics are summarised on one of their fields,
+									// so name it rather than leaving the number ambiguous.
+									const field =
+										metric.field === "qty" ? "" : ` [${metric.field}]`;
+									return `- ${metric.name}${field}: sum ${round(metric.sum)}${units}, avg ${round(metric.avg)}, min ${round(metric.min)}, max ${round(metric.max)} (n=${metric.count})`;
+								});
+
+								return {
+									content: [
+										{
+											type: "text",
+											text: `Health summary for ${window} (${result.directory}):\n\n${lines.join("\n")}\n\nWorkouts recorded: ${result.workoutCount}`,
+										},
+									],
+									isError: false,
+								};
+							}
+
+							default:
+								throw new Error(`Unknown health operation: ${operation}`);
+						}
+					} catch (error) {
+						const errorMessage = error instanceof Error ? error.message : String(error);
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Error in health tool: ${errorMessage}`,
+								},
+							],
+							isError: true,
+						};
+					}
+				}
+
 				default:
 					return {
 						content: [{ type: "text", text: `Unknown tool: ${name}` }],
@@ -1324,6 +1649,18 @@ end tell`;
 			process.exit(1);
 		}
 	})();
+}
+
+// Formatting helpers for the health tool
+function formatDate(date: Date): string {
+	// Local time, seconds dropped — health samples are rarely interesting at
+	// sub-minute precision and the shorter form keeps long listings readable.
+	const pad = (value: number) => `${value}`.padStart(2, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function round(value: number): number {
+	return Math.round(value * 100) / 100;
 }
 
 // Helper functions for argument type checking
@@ -1712,6 +2049,64 @@ function isMapsArgs(args: unknown): args is {
 			typeof guideName !== "string" ||
 			guideName === ""
 		) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+function isHealthArgs(args: unknown): args is {
+	operation: "sources" | "listMetrics" | "query" | "workouts" | "summary";
+	metric?: string;
+	startDate?: string;
+	endDate?: string;
+	aggregation?: "none" | "daily" | "weekly" | "monthly" | "total";
+	field?: string;
+	limit?: number;
+	directory?: string;
+} {
+	if (typeof args !== "object" || args === null) {
+		return false;
+	}
+
+	const { operation } = args as { operation?: unknown };
+	if (typeof operation !== "string") {
+		return false;
+	}
+
+	if (
+		!["sources", "listMetrics", "query", "workouts", "summary"].includes(
+			operation,
+		)
+	) {
+		return false;
+	}
+
+	if (operation === "query") {
+		const { metric } = args as { metric?: unknown };
+		if (typeof metric !== "string" || metric === "") {
+			return false;
+		}
+	}
+
+	const { aggregation } = args as { aggregation?: unknown };
+	if (
+		aggregation !== undefined &&
+		(typeof aggregation !== "string" ||
+			!["none", "daily", "weekly", "monthly", "total"].includes(aggregation))
+	) {
+		return false;
+	}
+
+	const { limit } = args as { limit?: unknown };
+	if (limit !== undefined && (typeof limit !== "number" || limit <= 0)) {
+		return false;
+	}
+
+	for (const key of ["startDate", "endDate", "field", "directory"] as const) {
+		const value = (args as Record<string, unknown>)[key];
+		if (value !== undefined && typeof value !== "string") {
 			return false;
 		}
 	}

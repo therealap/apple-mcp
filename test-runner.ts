@@ -10,9 +10,15 @@ const testCommands = {
   "reminders": "bun test tests/integration/reminders.test.ts --preload ./tests/setup.ts",
   "calendar": "bun test tests/integration/calendar.test.ts --preload ./tests/setup.ts",
   "maps": "bun test tests/integration/maps.test.ts --preload ./tests/setup.ts",
-  "web-search": "bun test tests/integration/web-search.test.ts --preload ./tests/setup.ts",
-  "mcp": "bun test tests/mcp/handlers.test.ts --preload ./tests/setup.ts",
-  "all": "bun test tests/**/*.test.ts --preload ./tests/setup.ts"
+  // Handler tests drive the server over stdio and need no Apple app.
+  "mcp": "bun test tests/mcp/handlers.test.ts",
+  // Health parses exported files rather than driving an Apple app, so it
+  // needs no test-data setup and runs without the preload.
+  "health": "bun test tests/unit/health.test.ts",
+  // Commands are split on spaces and spawned without a shell, so a glob here
+  // would reach bun unexpanded and silently match nothing. Bun discovers the
+  // test files under this directory itself.
+  "all": "bun test tests --preload ./tests/setup.ts"
 };
 
 async function runTest(testName: string) {

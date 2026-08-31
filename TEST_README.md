@@ -16,9 +16,13 @@ npm run test:mail
 npm run test:reminders
 npm run test:calendar
 npm run test:maps
-npm run test:web-search
 npm run test:mcp
+npm run test:health
 ```
+
+`test:health` and `test:mcp` need no Mac and no permissions: the first parses
+fixture export files in a temp folder, the second validates tool schemas and
+drives the server over stdio. Everything else talks to real Apple apps.
 
 ## 📋 Prerequisites
 
@@ -59,7 +63,8 @@ tests/
 │   ├── reminders.test.ts      # Reminders functionality
 │   ├── calendar.test.ts       # Calendar functionality
 │   ├── maps.test.ts           # Maps functionality
-│   └── web-search.test.ts     # Web search functionality
+├── unit/                      # Pure tests, no Apple apps required
+│   └── health.test.ts         # Health Auto Export parsing
 └── mcp/
     └── handlers.test.ts       # MCP tool handler validation
 ```
@@ -72,11 +77,21 @@ tests/
 - **Deterministic Data**: Uses consistent test phone number and data
 - **Comprehensive Coverage**: Success, failure, and edge cases
 
-### 2. Handler Tests
+### 2. Unit Tests
 
-- **MCP Tool Validation**: Verifies tool schemas and structure
+- **No Apple Apps**: The health tool reads exported JSON files, so its tests
+  run anywhere, including CI, with fixtures written to a temp directory
+- **No Permissions**: Nothing is prompted for, and nothing is written outside
+  that temp directory
+
+### 3. Handler Tests
+
+- **MCP Tool Validation**: Verifies tool schemas and structure, and that the
+  DXT manifest advertises the same tools the server does
 - **Parameter Validation**: Checks required/optional parameters
-- **Error Handling**: Validates graceful error handling
+- **Error Handling**: Drives a live server over stdio to confirm unknown
+  tools and bad arguments come back as error results, and that the server
+  stays responsive afterwards
 
 ## ⚠️ Troubleshooting
 
@@ -133,12 +148,10 @@ The test suite covers:
 - Test data created and cleaned up automatically
 - Real messages sent/received using test phone number
 - Calendar events, notes, reminders created in test folders/lists
-- Web search returning real results
 
 **Partial Success is Normal:**
 
 - Some Apple apps may require additional permissions
-- Network-dependent tests (web search) may fail offline
 - Messaging tests require active phone service
 
 ## 🧹 Test Data Cleanup
