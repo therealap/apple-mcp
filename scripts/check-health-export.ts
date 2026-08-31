@@ -41,10 +41,25 @@ console.log(`Files:    ${sources.files.length}`);
 console.log(`Metrics:  ${sources.metricCount}`);
 console.log(`Workouts: ${sources.workoutCount}`);
 
-for (const file of sources.files) {
+if (sources.truncated) {
+	console.log(
+		"\nWARNING: the scan stopped at its file limit, so some exports were not",
+	);
+	console.log(
+		"read and the figures above are incomplete. Point at a narrower folder.",
+	);
+}
+
+// A real archive runs to hundreds of files; listing every one buries the
+// summary that matters.
+const SHOWN = 10;
+for (const file of sources.files.slice(0, SHOWN)) {
 	console.log(
 		`  - ${file.path} (${file.metricNames.length} metrics, ${file.workoutCount} workouts)`,
 	);
+}
+if (sources.files.length > SHOWN) {
+	console.log(`  ...and ${sources.files.length - SHOWN} more`);
 }
 
 if (sources.skipped.length > 0) {

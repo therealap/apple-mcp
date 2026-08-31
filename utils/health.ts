@@ -7,7 +7,12 @@ const CONFIG = {
 	// Guards against walking an entire iCloud Drive if a user points the tool
 	// at a very broad directory.
 	MAX_SCAN_DEPTH: 4,
-	MAX_FILES: 500,
+	// A daily export automation running for years produces thousands of files:
+	// a real archive of 8 years held ~500 in one folder alone. The cap only
+	// exists to bound a mistargeted directory, so it sits well above what a
+	// genuine archive reaches, and hitting it is always reported rather than
+	// silently truncating the data.
+	MAX_FILES: 10_000,
 	MAX_FILE_BYTES: 64 * 1024 * 1024,
 	// Cap on raw samples handed back for a single query so a multi-year export
 	// cannot blow up the MCP response.
@@ -79,6 +84,10 @@ type ExportFile = {
 
 type ExportData = {
 	directory: string;
+	// True when the scan stopped at MAX_FILES, meaning some exports were not
+	// read. Never left implicit: a silently truncated archive produces wrong
+	// answers that look right.
+	truncated: boolean;
 	files: ExportFile[];
 	metrics: Map<string, Metric>;
 	workouts: Workout[];
@@ -526,7 +535,14 @@ async function loadExports(directory: string): Promise<ExportData> {
 		(a, b) => (a.start?.getTime() ?? 0) - (b.start?.getTime() ?? 0),
 	);
 
-	const data: ExportData = { directory, files, metrics, workouts, skipped };
+	const data: ExportData = {
+		directory,
+		truncated: paths.length >= CONFIG.MAX_FILES,
+		files,
+		metrics,
+		workouts,
+		skipped,
+	};
 	cache.set(directory, {
 		signature,
 		expires: Date.now() + CONFIG.CACHE_TTL_MS,
@@ -761,6 +777,7 @@ function requireMetric(metrics: Map<string, Metric>, name: string): Metric {
 async function getSources(directory?: string): Promise<
 	Result<{
 		directory: string;
+		truncated: boolean;
 		files: ExportFile[];
 		skipped: { path: string; reason: string }[];
 		metricCount: number;
@@ -775,6 +792,7 @@ async function getSources(directory?: string): Promise<
 	return {
 		success: true,
 		directory: opened.data.directory,
+		truncated: opened.data.truncated,
 		files: opened.data.files,
 		skipped: opened.data.skipped,
 		metricCount: opened.data.metrics.size,

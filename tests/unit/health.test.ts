@@ -608,3 +608,51 @@ describe("iCloud container detection", () => {
 		}
 	});
 });
+
+describe("large archives", () => {
+	it("reads an archive spanning many files and nested folders", async () => {
+		// A real archive is one file per export day across years of subfolders;
+		// an earlier 500-file cap silently truncated one at exactly 500.
+		const directory = join(root, "large");
+		const days = 600;
+
+		await Promise.all(
+			Array.from({ length: days }, (_, index) => {
+				const day = new Date(Date.UTC(2024, 0, 1 + index));
+				const stamp = day.toISOString().slice(0, 10);
+				const year = stamp.slice(0, 4);
+				return writeExport(
+					join(directory, "archive", year),
+					`HealthAutoExport-${stamp}.json`,
+					{
+						data: {
+							metrics: [
+								metric("step_count", "count", [
+									{ date: `${stamp} 12:00:00`, qty: 100 },
+								]),
+							],
+						},
+					},
+				);
+			}),
+		);
+
+		const sources = await healthModule.getSources(directory);
+		expect(sources.success).toBe(true);
+		if (!sources.success) return;
+
+		expect(sources.files.length).toBe(days);
+		expect(sources.truncated).toBe(false);
+
+		// Every day must be present, not just the first few hundred.
+		const query = await healthModule.queryMetric({
+			metric: "step_count",
+			aggregation: "total",
+			directory,
+		});
+		expect(query.success).toBe(true);
+		if (!query.success) return;
+		expect(query.buckets?.[0]?.count).toBe(days);
+		expect(query.buckets?.[0]?.sum).toBe(days * 100);
+	});
+});

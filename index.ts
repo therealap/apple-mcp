@@ -1323,6 +1323,12 @@ end tell`;
 											text: [
 												`Health Auto Export folder: ${result.directory}`,
 												`${result.files.length} export file(s), ${result.metricCount} distinct metrics, ${result.workoutCount} workouts.`,
+												...(result.truncated
+													? [
+															"",
+															"WARNING: the scan stopped at its file limit, so some exports were not read and totals here are incomplete. Point the tool at a narrower folder.",
+														]
+													: []),
 												"",
 												"Files:",
 												...fileLines,
