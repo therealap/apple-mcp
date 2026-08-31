@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import healthModule from "../../utils/health.js";
+import healthModule, { ICLOUD_CONTAINER_PATTERN } from "../../utils/health.js";
 
 // These tests read Health Auto Export files off disk rather than talking to any
 // Apple app, so unlike the integration suites they run anywhere.
@@ -575,5 +575,36 @@ describe("Health Auto Export parsing", () => {
 			expect(result.message).toContain("corrupt.json");
 			expect(result.message).toContain("unreadable JSON");
 		});
+	});
+});
+
+describe("iCloud container detection", () => {
+	it("matches the container names the app actually uses", () => {
+		// iCloud~com~ifunography~HealthExport is a confirmed real container from
+		// a live install; an earlier "healthautoexport" match missed it.
+		const real = [
+			"iCloud~com~ifunography~HealthExport",
+			"iCloud~com~ifunography~HealthAutoExport",
+			"iCloud~com~healthexport~HealthAutoExport",
+			"HealthAutoExport",
+			"healthexport",
+		];
+
+		for (const name of real) {
+			expect(ICLOUD_CONTAINER_PATTERN.test(name), name).toBe(true);
+		}
+	});
+
+	it("does not match unrelated iCloud containers", () => {
+		const unrelated = [
+			"com~apple~CloudDocs",
+			"iCloud~com~apple~Notes",
+			"iCloud~md~obsidian",
+			"iCloud~com~example~Exporter",
+		];
+
+		for (const name of unrelated) {
+			expect(ICLOUD_CONTAINER_PATTERN.test(name), name).toBe(false);
+		}
 	});
 });

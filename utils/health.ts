@@ -316,10 +316,16 @@ async function directoryExists(candidate: string): Promise<boolean> {
 	}
 }
 
+// Matches the app's iCloud container regardless of vendor and of whether the
+// bundle says HealthExport or HealthAutoExport. A confirmed real container is
+// iCloud~com~ifunography~HealthExport, which a stricter "healthautoexport"
+// match silently missed.
+const ICLOUD_CONTAINER_PATTERN = /health[a-z]*export/i;
+
 /**
- * Look for a Health Auto Export iCloud container, whose folder name varies by
- * app version (iCloud~com~...~HealthAutoExport). Matching on the name avoids
- * guessing the exact bundle identifier.
+ * Look for a Health Auto Export iCloud container under ~/Library/Mobile
+ * Documents. Matching on the name avoids guessing the exact bundle identifier,
+ * which varies by app version and vendor.
  */
 async function findICloudContainer(): Promise<string | undefined> {
 	let entries: Awaited<ReturnType<typeof fs.readdir>>;
@@ -330,7 +336,7 @@ async function findICloudContainer(): Promise<string | undefined> {
 	}
 
 	for (const entry of entries) {
-		if (!entry.isDirectory() || !/healthautoexport/i.test(entry.name)) {
+		if (!entry.isDirectory() || !ICLOUD_CONTAINER_PATTERN.test(entry.name)) {
 			continue;
 		}
 		const documents = join(ICLOUD_ROOT, entry.name, "Documents");
@@ -1002,6 +1008,10 @@ async function getSummary(options: {
 		workoutCount,
 	};
 }
+
+// Exported for tests: the container-name match is the piece that silently
+// fails when an export folder cannot be found automatically.
+export { ICLOUD_CONTAINER_PATTERN };
 
 export default {
 	getSources,
