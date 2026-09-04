@@ -21,6 +21,43 @@ const CONFIG = {
     MAX_EVENTS: 20
 };
 
+// Separator used to return several fields from one AppleScript string result
+const SCRIPT_FIELD_DELIMITER = "|:|";
+
+/**
+ * Escape a value for safe interpolation into an AppleScript string literal
+ * @param value Raw text coming from the caller
+ */
+function escapeForAppleScript(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Build AppleScript that assigns a date, component by component.
+ *
+ * Interpolating a formatted date string makes the script depend on the Mac's
+ * locale, so the components are set individually instead. `day` is reset to 1
+ * before the month changes so a short month can never clamp the date.
+ *
+ * @param variableName Name of the AppleScript variable to assign
+ * @param date Date to encode, read in the host machine's local time
+ * @param startOfDay Whether to snap the time to midnight (all-day events)
+ */
+function buildAppleScriptDate(variableName: string, date: Date, startOfDay = false): string {
+    const secondsIntoDay = startOfDay
+        ? 0
+        : date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds();
+
+    return [
+        `set ${variableName} to current date`,
+        `set day of ${variableName} to 1`,
+        `set year of ${variableName} to ${date.getFullYear()}`,
+        `set month of ${variableName} to ${date.getMonth() + 1}`,
+        `set day of ${variableName} to ${date.getDate()}`,
+        `set time of ${variableName} to ${secondsIntoDay}`
+    ].join("\n    ");
+}
+
 /**
  * Check if the Calendar app is accessible
  */
@@ -263,43 +300,49 @@ async function createEvent(
 
         console.error(`createEvent - Attempting to create event: "${title}"`);
 
-        const targetCalendar = calendarName || "Calendar";
-        
+        // Resolve the target calendar. A named calendar that does not exist is
+        // reported rather than silently redirected, so an appointment never
+        // lands somewhere unexpected; without a name the first one is used.
+        // `missing value` is AppleScript's null - the literal `null` is an
+        // undefined variable and aborts the script before the event is made.
+        const calendarLookup = calendarName
+            ? `
+    try
+        set targetCal to calendar "${escapeForAppleScript(calendarName)}"
+    end try
+    if targetCal is missing value then
+        error "Calendar \\"${escapeForAppleScript(calendarName)}\\" was not found."
+    end if`
+            : `
+    if (count of calendars) is 0 then
+        error "No calendars are available in the Calendar app."
+    end if
+    set targetCal to first calendar`;
+
         const script = `
 tell application "Calendar"
-    set startDate to date "${start.toLocaleString()}"
-    set endDate to date "${end.toLocaleString()}"
+    ${buildAppleScriptDate("startDate", start, isAllDay)}
+    ${buildAppleScriptDate("endDate", end, isAllDay)}
     
-    -- Find target calendar
-    set targetCal to null
-    try
-        set targetCal to calendar "${targetCalendar}"
-    on error
-        -- Use first available calendar
-        set targetCal to first calendar
-    end try
+    set targetCal to missing value
+${calendarLookup}
     
     -- Create the event
     tell targetCal
-        set newEvent to make new event with properties {summary:"${title.replace(/"/g, '\\"')}", start date:startDate, end date:endDate, allday event:${isAllDay}}
+        set newEvent to make new event with properties {summary:"${escapeForAppleScript(title)}", start date:startDate, end date:endDate, allday event:${isAllDay}}
+        ${location ? `set location of newEvent to "${escapeForAppleScript(location)}"` : ""}
+        ${notes ? `set description of newEvent to "${escapeForAppleScript(notes)}"` : ""}
         
-        if "${location || ""}" ≠ "" then
-            set location of newEvent to "${(location || '').replace(/"/g, '\\"')}"
-        end if
-        
-        if "${notes || ""}" ≠ "" then
-            set description of newEvent to "${(notes || '').replace(/"/g, '\\"')}"
-        end if
-        
-        return uid of newEvent
+        return (uid of newEvent) & "${SCRIPT_FIELD_DELIMITER}" & (name of targetCal)
     end tell
 end tell`;
 
-        const eventId = await runAppleScript(script) as string;
+        const result = await runAppleScript(script) as string;
+        const [eventId, createdIn] = String(result).split(SCRIPT_FIELD_DELIMITER);
         
         return {
             success: true,
-            message: `Event "${title}" created successfully.`,
+            message: `Event "${title}" created successfully in calendar "${createdIn}".`,
             eventId: eventId
         };
     } catch (error) {
