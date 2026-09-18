@@ -40,3 +40,20 @@
 - Follow established pattern for creating tool definitions
 - Include detailed descriptions and proper input schema
 - Organize related functionality into separate utility modules
+## Committing work — do this without being asked
+
+Before you finish, commit and push whatever you changed. Don't wait to be asked: ap
+often closes the tab, and uncommitted work is then only on this disk — no history, no
+copy on gibson.
+
+    git add -A && git commit -m "<what changed and why>" && git push
+
+- Write a real message: what changed and why, not "updates".
+- **Never commit a secret.** If `git status` shows a token, key, `.env`, or a `.bak`
+  of one, stop and tell ap rather than committing it.
+- If you deliberately leave something uncommitted (half-done refactor, an experiment),
+  say so in your closing message so ap knows it's there.
+
+A nightly sweep on gibson ("Backup - git sweep", 02:40) catches whatever gets missed,
+but it commits under a generic `auto-commit:` message and refuses any repo where
+anything looks like a secret. Your commit is the one with a useful message — make it.
