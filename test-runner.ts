@@ -15,6 +15,7 @@ const testCommands = {
   // Health parses exported files rather than driving an Apple app, so it
   // needs no test-data setup and runs without the preload.
   "health": "bun test tests/unit/health.test.ts",
+  "provenance": "bun test tests/unit/provenance.test.ts",
   // Commands are split on spaces and spawned without a shell, so a glob here
   // would reach bun unexpanded and silently match nothing. Bun discovers the
   // test files under this directory itself.

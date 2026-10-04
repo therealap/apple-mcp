@@ -1069,6 +1069,9 @@ end tell`;
 									notes,
 									isAllDay,
 									calendarName,
+									source_job,
+									source_script,
+									source_ref,
 								} = args;
 								const result = await calendarModule.createEvent(
 									title!,
@@ -1078,6 +1081,7 @@ end tell`;
 									notes,
 									isAllDay,
 									calendarName,
+									{ job: source_job, script: source_script, ref: source_ref },
 								);
 								return {
 									content: [
@@ -1897,6 +1901,9 @@ function isCalendarArgs(args: unknown): args is {
 	notes?: string;
 	isAllDay?: boolean;
 	calendarName?: string;
+	source_job?: string;
+	source_script?: string;
+	source_ref?: string;
 } {
 	if (typeof args !== "object" || args === null) {
 		return false;

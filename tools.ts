@@ -236,6 +236,18 @@ const CALENDAR_TOOL: Tool = {
       calendarName: {
         type: "string",
         description: "Name of the calendar to create the event in (optional for create operation, uses default calendar if not specified)"
+      },
+      source_job: {
+        type: "string",
+        description: "🤖 Source line: your job/task name, e.g. 'Weekly Look'. Every created event gets one '🤖 Source: …' line at the bottom of its notes; without this it says 'Claude session'"
+      },
+      source_script: {
+        type: "string",
+        description: "🤖 Source line: the script or skill (optional, default 'apple-mcp calendar create')"
+      },
+      source_ref: {
+        type: "string",
+        description: "🤖 Source line: what it came from, e.g. 'from email \"<subject>\"' (optional)"
       }
     },
     required: ["operation"]

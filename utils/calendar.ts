@@ -1,3 +1,4 @@
+import { stampNotes, type SourceInfo } from "./provenance.js";
 import { runAppleScript } from 'run-applescript';
 
 // Define types for our calendar events
@@ -247,6 +248,8 @@ end tell`;
  * @param notes Optional notes for the event
  * @param isAllDay Optional flag to create an all-day event
  * @param calendarName Optional calendar name to add the event to (uses default if not specified)
+ * @param source Optional 🤖 Source line fields (job/script/ref). The line is ALWAYS written to
+ *               the bottom of the notes; without a job it says "Claude session".
  */
 async function createEvent(
     title: string,
@@ -255,7 +258,8 @@ async function createEvent(
     location?: string,
     notes?: string,
     isAllDay = false,
-    calendarName?: string
+    calendarName?: string,
+    source: SourceInfo = {}
 ): Promise<{ success: boolean; message: string; eventId?: string }> {
     try {
         const accessResult = await requestCalendarAccess();
@@ -331,7 +335,7 @@ ${calendarLookup}
     tell targetCal
         set newEvent to make new event with properties {summary:"${escapeForAppleScript(title)}", start date:startDate, end date:endDate, allday event:${isAllDay}}
         ${location ? `set location of newEvent to "${escapeForAppleScript(location)}"` : ""}
-        ${notes ? `set description of newEvent to "${escapeForAppleScript(notes)}"` : ""}
+        set description of newEvent to "${escapeForAppleScript(stampNotes(notes, source))}"
         
         return (uid of newEvent) & "${SCRIPT_FIELD_DELIMITER}" & (name of targetCal)
     end tell
