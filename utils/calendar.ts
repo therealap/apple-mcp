@@ -1,4 +1,4 @@
-import { stampNotes, type SourceInfo } from "./provenance.js";
+import { stripLine, DEFAULT_JOB, DEFAULT_SCRIPT, type SourceInfo } from "./provenance.js";
 import { runAppleScript } from 'run-applescript';
 
 // Define types for our calendar events
@@ -24,6 +24,46 @@ const CONFIG = {
 
 // Separator used to return several fields from one AppleScript string result
 const SCRIPT_FIELD_DELIMITER = "|:|";
+
+// CalendarHelper.app (EventKit) — the one place calendar events are created
+// (2026-10-08): it dedupes before creating and stamps the 🤖 Source line.
+export const CALENDAR_HELPER = process.env.APPLE_MCP_CALENDAR_HELPER ||
+    "/Users/ap/Scripts/imessage-people-sync/CalendarHelper.app/Contents/MacOS/CalendarHelper";
+export const DEFAULT_CALENDAR = "🏡 Home";
+
+/** Local wall-clock "YYYY-MM-DDTHH:mm:ss" — what CalendarHelper expects. */
+export function localIso(d: Date): string {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T` +
+           `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+export function buildHelperCreateArgs(
+    title: string, start: Date, end: Date, location: string | undefined,
+    notes: string | undefined, isAllDay: boolean, calendarName: string | undefined,
+    source: SourceInfo,
+): string[] {
+    const args = ["create-event", "--title", title,
+        "--start", localIso(start), "--end", localIso(end),
+        "--calendar", calendarName || DEFAULT_CALENDAR, "--format", "json",
+        "--source-job", source.job?.trim() || DEFAULT_JOB,
+        "--source-script", source.script?.trim() || DEFAULT_SCRIPT];
+    if (source.ref?.trim()) args.push("--source-ref", source.ref.trim());
+    if (notes) args.push("--notes", stripLine(notes));
+    if (location) args.push("--location", location);
+    if (isAllDay) args.push("--all-day");
+    return args;
+}
+
+async function runHelper(args: string[]): Promise<string> {
+    const { execFile } = await import("node:child_process");
+    return new Promise((resolve, reject) => {
+        execFile(CALENDAR_HELPER, args, { timeout: 120_000 }, (err, stdout, stderr) => {
+            if (err) reject(new Error(String(stderr || err.message).trim().slice(0, 300)));
+            else resolve(String(stdout));
+        });
+    });
+}
 
 /**
  * Escape a value for safe interpolation into an AppleScript string literal
@@ -304,50 +344,34 @@ async function createEvent(
 
         console.error(`createEvent - Attempting to create event: "${title}"`);
 
-        // Resolve the target calendar. A named calendar that does not exist is
-        // reported rather than silently redirected, so an appointment never
-        // lands somewhere unexpected; without a name the first one is used.
-        // `missing value` is AppleScript's null - the literal `null` is an
-        // undefined variable and aborts the script before the event is made.
-        const calendarLookup = calendarName
-            ? `
-    try
-        set targetCal to calendar "${escapeForAppleScript(calendarName)}"
-    end try
-    if targetCal is missing value then
-        error "Calendar \\"${escapeForAppleScript(calendarName)}\\" was not found."
-    end if`
-            : `
-    if (count of calendars) is 0 then
-        error "No calendars are available in the Calendar app."
-    end if
-    set targetCal to first calendar`;
-
-        const script = `
-tell application "Calendar"
-    ${buildAppleScriptDate("startDate", start, isAllDay)}
-    ${buildAppleScriptDate("endDate", end, isAllDay)}
-    
-    set targetCal to missing value
-${calendarLookup}
-    
-    -- Create the event
-    tell targetCal
-        set newEvent to make new event with properties {summary:"${escapeForAppleScript(title)}", start date:startDate, end date:endDate, allday event:${isAllDay}}
-        ${location ? `set location of newEvent to "${escapeForAppleScript(location)}"` : ""}
-        set description of newEvent to "${escapeForAppleScript(stampNotes(notes, source))}"
-        
-        return (uid of newEvent) & "${SCRIPT_FIELD_DELIMITER}" & (name of targetCal)
-    end tell
-end tell`;
-
-        const result = await runAppleScript(script) as string;
-        const [eventId, createdIn] = String(result).split(SCRIPT_FIELD_DELIMITER);
-        
+        // 2026-10-08: creation goes through CalendarHelper (calendar_helper.py
+        // create-event), not AppleScript, so it shares the one duplicate check
+        // every Claude calendar writer uses (event_dedupe.py: same normalised
+        // title, same date, overlapping time or both all-day, on any writable
+        // calendar → the existing event is returned, nothing new is made).
+        // CalendarHelper also stamps the 🤖 Source line. No calendar named →
+        // DEFAULT_CALENDAR (ap's regular personal calendar), never "first".
+        const args = buildHelperCreateArgs(title, start, end, location, notes, isAllDay,
+                                           calendarName, source);
+        const out = await runHelper(args);
+        let ev: { id?: string; title?: string; calendar?: string; deduped?: boolean;
+                  dedupe_action?: string } = {};
+        try {
+            ev = JSON.parse(out.trim().split("\n").pop() || "{}");
+        } catch {
+            return { success: false, message: `CalendarHelper returned non-JSON: ${out.slice(0, 200)}` };
+        }
+        if (ev.deduped) {
+            return {
+                success: true,
+                message: `Not created — "${title}" is already on the calendar as "${ev.title}" in "${ev.calendar}" (${ev.dedupe_action}).`,
+                eventId: ev.id
+            };
+        }
         return {
             success: true,
-            message: `Event "${title}" created successfully in calendar "${createdIn}".`,
-            eventId: eventId
+            message: `Event "${title}" created successfully in calendar "${ev.calendar}".`,
+            eventId: ev.id
         };
     } catch (error) {
         return {
